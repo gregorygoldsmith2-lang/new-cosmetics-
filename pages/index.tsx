@@ -19,7 +19,7 @@ interface ChangeEvent {
   needs_review: boolean;
   reviewed_at: string | null;
   snapshot_after_id: string;
-  sources: {
+  sources?: {
     name: string;
     url: string;
   }[];
@@ -48,7 +48,119 @@ export default function Dashboard() {
       .select('id, name')
       .eq('is_active', true);
     setSources(data || []);
-@@ -168,108 +168,111 @@ export default function Dashboard() {
+  }
+
+  async function fetchChanges() {
+    setLoading(true);
+    let query = supabase
+      .from('change_events')
+      .select(
+        'id, detected_at, change_summary, tags, status, effective_date, needs_review, reviewed_at, snapshot_after_id, sources (name, url)'
+      )
+      .order('detected_at', { ascending: false });
+
+    if (filterSource !== 'all') {
+      query = query.eq('source_id', filterSource);
+    }
+
+    if (filterReview === 'needs_review') {
+      query = query.eq('needs_review', true);
+    }
+
+    if (filterReview === 'reviewed') {
+      query = query.eq('needs_review', false);
+    }
+
+    const { data } = await query;
+    setChanges((data as ChangeEvent[]) || []);
+    setLoading(false);
+  }
+
+  async function markReviewed(changeId: string) {
+    const reviewedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from('change_events')
+      .update({ needs_review: false, reviewed_at: reviewedAt })
+      .eq('id', changeId);
+
+    if (!error) {
+      setChanges((prevChanges) =>
+        prevChanges.map((change) =>
+          change.id === changeId
+            ? { ...change, needs_review: false, reviewed_at: reviewedAt }
+            : change
+        )
+      );
+    }
+  }
+
+  async function viewSnapshot(snapshotId: string) {
+    const { data, error } = await supabase
+      .from('snapshots')
+      .select('raw_html')
+      .eq('id', snapshotId)
+      .single();
+
+    if (error || !data?.raw_html) {
+      alert('Snapshot unavailable.');
+      return;
+    }
+
+    const newWindow = window.open('', '_blank');
+    if (newWindow) {
+      newWindow.document.write(data.raw_html);
+      newWindow.document.close();
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Cosmetics Regulatory Monitor
+          </h1>
+          <p className="text-gray-600">
+            Daily tracking of regulatory updates from FDA, EU, and global sources
+          </p>
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Source
+              </label>
+              <select
+                value={filterSource}
+                onChange={(e) => setFilterSource(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+              >
+                <option value="all">All Sources</option>
+                {sources.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    {source.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Review Status
+              </label>
+              <select
+                value={filterReview}
+                onChange={(e) => setFilterReview(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+              >
+                <option value="all">All Changes</option>
+                <option value="needs_review">Needs Review</option>
+                <option value="reviewed">Reviewed</option>
+              </select>
+            </div>
+
             <div className="pt-7">
               <button
                 onClick={fetchChanges}
@@ -85,7 +197,7 @@ export default function Dashboard() {
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="text-lg font-semibold text-gray-900">
-                          {primarySource?.name}
+                          {primarySource?.name || 'Unknown Source'}
                         </h3>
                         {change.needs_review && !change.reviewed_at && (
                           <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded">
@@ -102,7 +214,8 @@ export default function Dashboard() {
                         Detected: {new Date(change.detected_at).toLocaleString()}
                         {change.effective_date && (
                           <span className="ml-3">
-                            Effective: {new Date(change.effective_date).toLocaleDateString()}
+                            Effective:{' '}
+                            {new Date(change.effective_date).toLocaleDateString()}
                           </span>
                         )}
                       </div>
@@ -141,9 +254,9 @@ export default function Dashboard() {
                     </div>
                   )}
 
-                  {change.sources?.[0]?.url && (
+                  {primarySource?.url && (
                     <a
-                      href={change.sources[0].url}
+                      href={primarySource.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-blue-600 hover:text-blue-800 text-sm"
